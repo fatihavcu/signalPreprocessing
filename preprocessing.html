@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gelişmiş Spektral, Kromatografik ve Kütle Ön İşleme Paneli</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+            font-size: 22px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 25px;
+            margin-top: 20px;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        .control-group {
+            margin-bottom: 18px;
+        }
+        .control-group.highlight {
+            background: #ebf5fb;
+            padding: 10px;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #495057;
+            font-size: 13.5px;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            box-sizing: border-box;
+        }
+        .value-display {
+            font-weight: normal;
+            float: right;
+            color: #6c757d;
+        }
+        .chart-container {
+            position: relative;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            min-height: 500px;
+        }
+        .info-box {
+            margin-top: 15px;
+            padding: 12px;
+            background-color: #e8f4fd;
+            border-left: 4px solid #2980b9;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Analitik Sinyal Ön İşleme (Preprocessing) Laboratuvarı</h1>
+    
+    <div class="dashboard">
+        <!-- Kontrol Paneli -->
+        <div class="controls">
+            <div class="control-group highlight">
+                <label for="dataType">Analiz Yöntemi (Veri Seti)</label>
+                <select id="dataType">
+                    <option value="uv">UV-Vis Spektroskopisi (200-400 nm)</option>
+                    <option value="raman">Raman Spektroskopisi (200-2000 cm⁻¹)</option>
+                    <option value="ftir">FTIR (Transmission Modu - 4000-400 cm⁻¹)</option>
+                    <option value="atr">ATR-FTIR Spektroskopisi (4000-600 cm⁻¹)</option>
+                    <option value="nmr">¹H-NMR Spektroskopisi (10 - 0 ppm)</option>
+                    <option value="hplc">HPLC Kromatografisi (0-15 dk Alıkonma)</option>
+                    <option value="gcms">GC-MS Kromatogramı (TIC - 5-25 dk)</option>
+                    <option value="ms">Kütle Spektrometrisi (Mass Spec - 50-500 m/z)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="method">Uygulanacak Ön İşleme</label>
+                <select id="method">
+                    <option value="sg">Savitzky-Golay Yumuşatma</option>
+                    <option value="detrend">Taban Çizgisi / Faz Düzeltme</option>
+                    <option value="snv">SNV Normalizasyonu</option>
+                    <option value="deriv1">Birinci Türev (1st Derivative)</option>
+                    <option value="deriv2">İkinci Türev (2nd Derivative)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="noise">Rastgele Gürültü Seviyesi <span class="value-display" id="noiseVal">0.10</span></label>
+                <input type="range" id="noise" min="0" max="0.3" step="0.01" value="0.10">
+            </div>
+
+            <div class="control-group">
+                <label for="drift">Taban Çizgisi / Arka Plan Kayması <span class="value-display" id="driftVal">0.5</span></label>
+                <input type="range" id="drift" min="0" max="2.0" step="0.05" value="0.5">
+            </div>
+
+            <div class="control-group" id="sg-window-group">
+                <label for="sgWindow">SG Filtre Penceresi <span class="value-display" id="sgWindowVal">15</span></label>
+                <input type="range" id="sgWindow" min="5" max="35" step="2" value="15">
+            </div>
+
+            <div class="info-box" id="infoText">
+                Yöntem açıklamaları dinamik yüklenecektir.
+            </div>
+        </div>
+
+        <!-- Grafik Alanı -->
+        <div class="chart-container">
+            <canvas id="mainChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+let chart;
+let currentXAxes = [];
+
+function randomNormal() {
+    let u = 0, v = 0;
+    while(u === 0) u = Math.random();
+    while(v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+function gaussian(x, amp, mean, std) {
+    return amp * Math.exp(-Math.pow(x - mean, 2) / (2 * Math.pow(std, 2)));
+}
+
+function lorentzian(x, amp, mean, xhalf) {
+    return amp * (Math.pow(xhalf, 2) / (Math.pow(x - mean, 2) + Math.pow(xhalf, 2)));
+}
+
+function phasedLorentzian(x, amp, mean, xhalf, phase) {
+    let L_disp = amp * ((xhalf * (x - mean)) / (Math.pow(x - mean, 2) + Math.pow(xhalf, 2)));
+    let L_abs = lorentzian(x, amp, mean, xhalf);
+    return Math.cos(phase) * L_abs + Math.sin(phase) * L_disp;
+}
+
+function skewedPeak(x, amp, mean, std, tail) {
+    let g = gaussian(x, amp, mean, std);
+    if (x > mean) {
+        g = g * Math.exp(-(x - mean) * tail);
+    }
+    return g;
+}
+
+function generateData(type, noiseLevel, driftLevel) {
+    const pure = [];
+    const corrupted = [];
+    currentXAxes = [];
+
+    if (type === 'uv') {
+        for (let wl = 200; wl <= 400; wl += 0.5) {
+            currentXAxes.push(wl);
+            let p = gaussian(wl, 1.0, 255, 12) + gaussian(wl, 0.7, 275, 8) + gaussian(wl, 0.4, 330, 22);
+            pure.push(p);
+            let drift = (driftLevel * (wl - 200)) / 200;
+            corrupted.push(p + drift + randomNormal() * noiseLevel * 0.5);
+        }
+    } 
+    else if (type === 'raman') {
+        for (let shift = 200; shift <= 2000; shift += 4) {
+            currentXAxes.push(shift);
+            let p = gaussian(shift, 1.5, 600, 10) + gaussian(shift, 1.2, 1000, 12) + 
+                    gaussian(shift, 0.8, 1025, 8) + gaussian(shift, 1.8, 1600, 15);
+            pure.push(p);
+            let drift = driftLevel * 2 * Math.exp((shift - 200) / 1000); 
+            corrupted.push(p + drift + randomNormal() * noiseLevel);
+        }
+    } 
+    else if (type === 'ftir') {
+        for (let wn = 4000; wn >= 400; wn -= 8) {
+            currentXAxes.push(wn);
+            let p = gaussian(wn, 0.9, 3300, 60) + gaussian(wn, 1.4, 2920, 20) + 
+                    gaussian(wn, 1.1, 1715, 15) + gaussian(wn, 0.7, 1450, 25);
+            pure.push(p);
+            let drift = driftLevel * (Math.sin((wn - 400) / 500) * 0.3 + 0.5);
+            corrupted.push(p + drift + randomNormal() * noiseLevel * 0.4);
+        }
+    } 
+    else if (type === 'atr') {
+        // ATR-FTIR: Kristal penetrasyon derinliği uzun dalga boylarında (düşük dalga numaralarında) arttığı için sinyal şiddeti sağa doğru artar.
+        for (let wn = 4000; wn >= 600; wn -= 8) {
+            currentXAxes.push(wn);
+            // ATR etkisinden dolayı parmak izi bölgesindeki (1500-600 cm-1) piklerin şiddeti doğal olarak daha belirgindir.
+            let p = gaussian(wn, 0.5, 3290, 70) + gaussian(wn, 0.7, 2850, 25) + 
+                    gaussian(wn, 1.5, 1650, 15) + gaussian(wn, 1.2, 1040, 30);
+            pure.push(p);
+            // Saçılma ve kristal temassızlığından kaynaklanan basamaklı taban çizgisi kayması
+            let drift = driftLevel * 0.4 + (4000 - wn)/3400 * driftLevel * 0.3;
+            corrupted.push(p + drift + randomNormal() * noiseLevel * 0.4);
+        }
+    }
+    else if (type === 'nmr') {
+        for (let ppm = 10.0; ppm >= 0.0; ppm -= 0.02) {
+            currentXAxes.push(ppm.toFixed(2));
+            let kuartet = lorentzian(ppm, 0.3, 4.16, 0.03) + lorentzian(ppm, 0.9, 4.12, 0.03) + 
+                           lorentzian(ppm, 0.9, 4.08, 0.03) + lorentzian(ppm, 0.3, 4.04, 0.03);
+            let dublet = lorentzian(ppm, 1.2, 1.22, 0.03) + lorentzian(ppm, 1.2, 1.16, 0.03);
+            let p = kuartet + dublet;
+            pure.push(p);
+            
+            let phaseError = driftLevel * 0.5; 
+            let p_corrupted = phasedLorentzian(ppm, 0.3, 4.16, 0.03, phaseError) + 
+                              phasedLorentzian(ppm, 0.9, 4.12, 0.03, phaseError) + 
+                              phasedLorentzian(ppm, 0.9, 4.08, 0.03, phaseError) + 
+                              phasedLorentzian(ppm, 0.3, 4.04, 0.03, phaseError) +
+                              phasedLorentzian(ppm, 1.2, 1.22, 0.03, phaseError) + 
+                              phasedLorentzian(ppm, 1.2, 1.16, 0.03, phaseError);
+            
+            let lineDrift = 0.1 * driftLevel * (10 - ppm); 
+            corrupted.push(p_corrupted + lineDrift + randomNormal() * noiseLevel * 0.2);
+        }
+    }
+    else if (type === 'hplc') {
+        for (let t = 0; t <= 15; t += 0.03) {
+            currentXAxes.push(t.toFixed(2));
+            let p = skewedPeak(t, 2.0, 3.2, 0.12, 1.2) + 
+                    skewedPeak(t, 1.5, 5.5, 0.18, 0.8) + 
+                    skewedPeak(t, 2.5, 10.1, 0.25, 0.5);
+            pure.push(p);
+            let drift = driftLevel * 0.2 + Math.sin(t * 0.8) * driftLevel * 0.15;
+            corrupted.push(p + drift + randomNormal() * noiseLevel * 0.3);
+        }
+    }
+    else if (type === 'gcms') {
+        // GC-MS Toplam İyon Kromatogramı (TIC): Zamanla yükselen kolon kanaması (column bleed) arka planı simüle edilir
+        for (let t = 5.0; t <= 25.0; t += 0.04) {
+            currentXAxes.push(t.toFixed(2));
+            let p = skewedPeak(t, 1.8, 8.5, 0.10, 1.5) + 
+                    skewedPeak(t, 2.8, 14.2, 0.15, 1.0) + 
+                    skewedPeak(t, 1.2, 21.0, 0.08, 2.0);
+            pure.push(p);
+            // Yüksek sıcaklıklarda artan kolon kanaması eğrisi
+            let drift = driftLevel * 0.1 + Math.pow((t - 5) / 20, 2) * driftLevel * 0.6;
+            corrupted.push(p + drift + randomNormal() * noiseLevel * 0.35);
+        }
+    }
+    else if (type === 'ms') {
+        // Kütle Spektrometrisi (MS): Ayrık ve çok keskin kütle/yük (m/z) fragman iyonları
+        for (let mz = 50; mz <= 500; mz += 1) {
+            currentXAxes.push(mz);
+            // Belirli fragman iyon kütleleri
+            let p = gaussian(mz, 2.5, 91, 0.5) + gaussian(mz, 1.8, 147, 0.5) + 
+                    gaussian(mz, 1.0, 210, 0.5) + gaussian(mz, 3.0, 320, 0.5);
+            pure.push(p);
+            // Kimyasal gürültü / vakum arka plan gürültüsü
+            let drift = driftLevel * 0.05;
+            corrupted.push(p + drift + Math.abs(randomNormal()) * noiseLevel * 0.8);
+        }
+    }
+
+    return { pure, corrupted };
+}
+
+function applyPreprocessing(corrupted, method, sgWin, dataType) {
+    const n = corrupted.length;
+    let processed = new Array(n).fill(0);
+    
+    if (method === 'sg' || method === 'deriv1' || method === 'deriv2') {
+        let derivOrder = method === 'sg' ? 0 : (method === 'deriv1' ? 1 : 2);
+        let half = Math.floor(sgWin / 2);
+        
+        for (let i = 0; i < n; i++) {
+            let sum = 0;
+            let norm = 0;
+            for (let k = -half; k <= half; k++) {
+                let idx = Math.min(Math.max(i + k, 0), n - 1);
+                let coeff = 1;
+                if (derivOrder === 1) coeff = k;
+                if (derivOrder === 2) coeff = (3 * k * k - half * (half + 1));
+                
+                sum += corrupted[idx] * coeff;
+                norm += coeff * coeff;
+            }
+            processed[i] = (sum / (norm || 1)) * (derivOrder === 2 ? -2 : 1);
+            if (method === 'deriv1') processed[i] *= 4;
+        }
+    } 
+    else if (method === 'detrend') {
+        if (['raman', 'ftir', 'atr', 'nmr', 'gcms'].includes(dataType)) {
+            let baseline = [...corrupted];
+            let iterations = (dataType === 'nmr' || dataType === 'raman') ? 5 : 3;
+            for (let run = 0; run < iterations; run++) {
+                for (let i = 1; i < n - 1; i++) {
+                    baseline[i] = (baseline[i-1] + baseline[i+1]) / 2;
+                    if (baseline[i] > corrupted[i]) baseline[i] = corrupted[i];
+                }
+            }
+            for (let i = 0; i < n; i++) processed[i] = corrupted[i] - baseline[i];
+        } else {
+            let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+            for (let i = 0; i < n; i++) {
+                sumX += i; sumY += corrupted[i]; sumXY += i * corrupted[i]; sumXX += i * i;
+            }
+            let slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+            let intercept = (sumY - slope * sumX) / n;
+            for (let i = 0; i < n; i++) processed[i] = corrupted[i] - (slope * i + intercept);
+        }
+    } 
+    else if (method === 'snv') {
+        let sum = corrupted.reduce((a, b) => a + b, 0);
+        let mean = sum / n;
+        let sqDiffSum = corrupted.reduce((a, b) => a + Math.pow(b - mean, 2), 0);
+        let std = Math.sqrt(sqDiffSum / n);
+        for (let i = 0; i < n; i++) processed[i] = (corrupted[i] - mean) / (std + 1e-8);
+    }
+    
+    return processed;
+}
+
+const explanations = {
+    uv: "<strong>UV-Vis Modu:</strong> Genellikle geniş moleküler absorpsiyon bantları içerir. Sinyal varyasyonunu standartlaştırmak için **SNV** veya **MSC** normalizasyonu çok sık tercih edilir.",
+    raman: "<strong>Raman Modu:</strong> Çok keskin saçılma pikleri barındırır. Güçlü floresan arka planı yok etmek için **Yinelemeli Taban Çizgisi Düzeltme (AsLS)** veya doğrudan **2. Türev** filtresi hayat kurtarır.",
+    ftir: "<strong>FTIR (Transmission) Modu:</strong> Numunenin tamamından geçen ışık bilgisini içerir. Eksen 4000-400 cm⁻¹'e geriye doğru akar. **Savitzky-Golay Yumuşatma** parmak izi bölgesindeki ince sinyalleri korumada başarılıdır.",
+    atr: "<strong>ATR-FTIR Modu:</strong> Kristal yüzey penetrasyon derinliği dalga boyuna göre değiştiğinden sinyal şiddeti düşük frekanslarda (sağa doğru) artış gösterir. **SNV** ve **Detrend** fiziksel kristal temas farklılıklarını minimize etmek için mükemmeldir.",
+    nmr: "<strong>¹H-NMR Modu:</strong> Kimyasal kayma ekseni 10'dan 0 ppm'e geriye akar. Spin yarılmaları (multipletler) görünür. Ham verideki en büyük sorun olan **faz bozulmaları** taban çizgisi algoritması ile düzeltilerek pikler simetrik Lorentz formuna kavuşturulur.",
+    hplc: "<strong>HPLC Kromatogram Modu:</strong> Zamana bağlı kimyasal ayrımı gösterir. Kolon yaşlanması ve çözücü gradyanı taban çizgisi dalgalanmalarına sebep olur. **Taban çizgisi düzeltme** integral pik alanlarının doğru hesaplanmasını sağlar.",
+    gcms: "<strong>GC-MS TIC Kromatogramı:</strong> Sıcaklık programı yükseldikçe kolondan kimyasal madde kopması (kolon kanaması - column bleed) nedeniyle taban çizgisi üssel olarak yukarı tırmanır. **Taban Çizgisi Filtresi** bu sahte eğriyi sıfırlayarak sadece gerçek kimyasal bileşen piklerini bırakır.",
+    ms: "<strong>Kütle Spektrometrisi (MS):</strong> Ayrık ve çok keskin iyon fragman ($m/z$) kütle çizgilerini gösterir. **Savitzky-Golay Yumuşatma** filtresi kimyasal arka plan gürültü gürültüsünü (grass noise) bastırarak gerçek iyon piklerinin S/N (sinyal/gürültü) oranını artırır."
+};
+
+function updateDashboard() {
+    const dataType = document.getElementById('dataType').value;
+    const method = document.getElementById('method').value;
+    const noise = parseFloat(document.getElementById('noise').value);
+    const drift = parseFloat(document.getElementById('drift').value);
+    const sgWindow = parseInt(document.getElementById('sgWindow').value);
+    
+    document.getElementById('noiseVal').innerText = noise;
+    document.getElementById('driftVal').innerText = drift;
+    document.getElementById('sgWindowVal').innerText = sgWindow;
+    
+    document.getElementById('infoText').innerHTML = explanations[dataType];
+    
+    if (method === 'detrend' || method === 'snv') {
+        document.getElementById('sg-window-group').style.display = 'none';
+    } else {
+        document.getElementById('sg-window-group').style.display = 'block';
+    }
+    
+    const data = generateData(dataType, noise, drift);
+    const processedData = applyPreprocessing(data.corrupted, method, sgWindow, dataType);
+    
+    chart.data.labels = currentXAxes;
+    chart.data.datasets[0].data = data.pure;
+    chart.data.datasets[1].data = data.corrupted;
+    chart.data.datasets[2].data = processedData;
+    
+    if (dataType === 'uv') { chart.options.scales.x.title.text = 'Dalga Boyu (nm)'; }
+    else if (dataType === 'raman') { chart.options.scales.x.title.text = 'Raman Kayması (Raman Shift - cm⁻¹)'; }
+    else if (dataType === 'ftir') { chart.options.scales.x.title.text = 'Dalga Numarası (Wavenumber - cm⁻¹)'; }
+    else if (dataType === 'atr') { chart.options.scales.x.title.text = 'ATR Dalga Numarası (Wavenumber - cm⁻¹)'; }
+    else if (dataType === 'nmr') { chart.options.scales.x.title.text = 'Kimyasal Kayma (Chemical Shift - δ ppm)'; }
+    else if (dataType === 'hplc') { chart.options.scales.x.title.text = 'Alıkonma Zamanı (Retention Time - dakika)'; }
+    else if (dataType === 'gcms') { chart.options.scales.x.title.text = 'GC Alıkonma Zamanı (Retention Time - dakika)'; }
+    else if (dataType === 'ms') { chart.options.scales.x.title.text = 'Kütle / Yük Oranı (m/z)'; }
+    
+    chart.data.datasets[2].label = document.getElementById('method').options[document.getElementById('method').selectedIndex].text;
+    chart.update('none');
+}
+
+window.onload = function() {
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                { label: 'Saf İdeal Sinyal', data: [], borderColor: '#2ecc71', borderWidth: 2, pointRadius: 0, fill: false },
+                { label: 'Bozulmuş Ham Veri', data: [], borderColor: '#e74c3c', borderWidth: 1.2, pointRadius: 0, fill: false, alpha: 0.4 },
+                { label: 'Ön İşlenmiş Filtreli Veri', data: [], borderColor: '#3498db', borderWidth: 2.5, pointRadius: 0, fill: false }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Eksen', font: { weight: 'bold', size: 12 } } },
+                y: { title: { display: true, text: 'Sinyal Şiddeti', font: { weight: 'bold', size: 12 } } }
+            },
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 20 } }
+            }
+        }
+    });
+
+    document.getElementById('dataType').addEventListener('change', updateDashboard);
+    document.getElementById('method').addEventListener('change', updateDashboard);
+    document.getElementById('noise').addEventListener('input', updateDashboard);
+    document.getElementById('drift').addEventListener('input', updateDashboard);
+    document.getElementById('sgWindow').addEventListener('input', updateDashboard);
+    
+    updateDashboard();
+};
+</script>
+</body>
+</html>
