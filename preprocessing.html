@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gelişmiş Spektral, Kromatografik ve Kütle Ön İşleme Paneli</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -76,6 +78,9 @@
             border-radius: 8px;
             min-height: 500px;
         }
+        #mainChart {
+            cursor: zoom-in;
+        }
         .info-box {
             margin-top: 15px;
             padding: 12px;
@@ -85,18 +90,48 @@
             font-size: 13px;
             line-height: 1.5;
         }
+        #resetZoomBtn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+            background: #3498db;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 5px;
+            font-size: 12.5px;
+            cursor: pointer;
+        }
+        #resetZoomBtn:hover {
+            background: #2980b9;
+        }
+        .zoom-hint {
+            font-size: 11.5px;
+            color: #95a5a6;
+            text-align: right;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Analitik Sinyal Ön İşleme (Preprocessing) Laboratuvarı</h1>
+    <h1 id="mainHeading">Analitik Sinyal Ön İşleme (Preprocessing) Laboratuvarı</h1>
     
     <div class="dashboard">
         <!-- Kontrol Paneli -->
         <div class="controls">
+            <div class="control-group">
+                <label for="langSelect" id="langLabel">Dil / Language</label>
+                <select id="langSelect">
+                    <option value="tr">Türkçe</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+
             <div class="control-group highlight">
-                <label for="dataType">Analiz Yöntemi (Veri Seti)</label>
+                <label for="dataType" id="dataTypeLabel">Analiz Yöntemi (Veri Seti)</label>
                 <select id="dataType">
                     <option value="uv">UV-Vis Spektroskopisi (200-400 nm)</option>
                     <option value="raman">Raman Spektroskopisi (200-2000 cm⁻¹)</option>
@@ -110,9 +145,11 @@
             </div>
 
             <div class="control-group">
-                <label for="method">Uygulanacak Ön İşleme</label>
+                <label for="method" id="methodLabel">Uygulanacak Ön İşleme</label>
                 <select id="method">
                     <option value="sg">Savitzky-Golay Yumuşatma</option>
+                    <option value="movavg">Hareketli Ortalama (Moving Average)</option>
+                    <option value="boxcar">BoxCar Ortalama (BoxCar Average)</option>
                     <option value="detrend">Taban Çizgisi / Faz Düzeltme</option>
                     <option value="snv">SNV Normalizasyonu</option>
                     <option value="deriv1">Birinci Türev (1st Derivative)</option>
@@ -121,18 +158,23 @@
             </div>
 
             <div class="control-group">
-                <label for="noise">Rastgele Gürültü Seviyesi <span class="value-display" id="noiseVal">0.10</span></label>
+                <label for="noise" id="noiseLabel">Rastgele Gürültü Seviyesi <span class="value-display" id="noiseVal">0.10</span></label>
                 <input type="range" id="noise" min="0" max="0.3" step="0.01" value="0.10">
             </div>
 
             <div class="control-group">
-                <label for="drift">Taban Çizgisi / Arka Plan Kayması <span class="value-display" id="driftVal">0.5</span></label>
+                <label for="drift" id="driftLabel">Taban Çizgisi / Arka Plan Kayması <span class="value-display" id="driftVal">0.5</span></label>
                 <input type="range" id="drift" min="0" max="2.0" step="0.05" value="0.5">
             </div>
 
             <div class="control-group" id="sg-window-group">
-                <label for="sgWindow">SG Filtre Penceresi <span class="value-display" id="sgWindowVal">15</span></label>
+                <label for="sgWindow" id="sgWindowLabel">Filtre Penceresi <span class="value-display" id="sgWindowVal">15</span></label>
                 <input type="range" id="sgWindow" min="5" max="35" step="2" value="15">
+            </div>
+
+            <div class="control-group" id="movavg-window-group" style="display:none;">
+                <label for="movavgWindow" id="movavgWindowLabel">Pencere Boyutu (Nokta Sayısı) <span class="value-display" id="movavgWindowVal">5</span></label>
+                <input type="range" id="movavgWindow" min="3" max="15" step="2" value="5">
             </div>
 
             <div class="info-box" id="infoText">
@@ -142,9 +184,11 @@
 
         <!-- Grafik Alanı -->
         <div class="chart-container">
+            <button id="resetZoomBtn" type="button">Yakınlaştırmayı Sıfırla</button>
             <canvas id="mainChart"></canvas>
         </div>
     </div>
+    <div class="zoom-hint" id="zoomHint">Yakınlaştırmak istediğiniz alanı fare ile sürükleyerek işaretleyin.</div>
 </div>
 
 <script>
@@ -289,7 +333,7 @@ function generateData(type, noiseLevel, driftLevel) {
     return { pure, corrupted };
 }
 
-function applyPreprocessing(corrupted, method, sgWin, dataType) {
+function applyPreprocessing(corrupted, method, sgWin, dataType, movavgWin) {
     const n = corrupted.length;
     let processed = new Array(n).fill(0);
     
@@ -313,6 +357,31 @@ function applyPreprocessing(corrupted, method, sgWin, dataType) {
             if (method === 'deriv1') processed[i] *= 4;
         }
     } 
+    else if (method === 'movavg') {
+        // Hareketli Ortalama: seçilen nokta sayısı (3,5,7,9...) kadar kayan pencerenin aritmetik ortalaması
+        let half = Math.floor(movavgWin / 2);
+        for (let i = 0; i < n; i++) {
+            let sum = 0, count = 0;
+            for (let k = -half; k <= half; k++) {
+                let idx = Math.min(Math.max(i + k, 0), n - 1);
+                sum += corrupted[idx];
+                count++;
+            }
+            processed[i] = sum / count;
+        }
+    }
+    else if (method === 'boxcar') {
+        // BoxCar Ortalama: örtüşmeyen (non-overlapping) pencereler halinde ortalama alınır,
+        // her pencere kendi ortalama değeriyle basamaklı (staircase) şekilde temsil edilir
+        let win = Math.max(1, sgWin);
+        for (let start = 0; start < n; start += win) {
+            let end = Math.min(start + win, n);
+            let sum = 0;
+            for (let i = start; i < end; i++) sum += corrupted[i];
+            let avg = sum / (end - start);
+            for (let i = start; i < end; i++) processed[i] = avg;
+        }
+    }
     else if (method === 'detrend') {
         if (['raman', 'ftir', 'atr', 'nmr', 'gcms'].includes(dataType)) {
             let baseline = [...corrupted];
@@ -346,52 +415,212 @@ function applyPreprocessing(corrupted, method, sgWin, dataType) {
 }
 
 const explanations = {
-    uv: "<strong>UV-Vis Modu:</strong> Genellikle geniş moleküler absorpsiyon bantları içerir. Sinyal varyasyonunu standartlaştırmak için **SNV** veya **MSC** normalizasyonu çok sık tercih edilir.",
-    raman: "<strong>Raman Modu:</strong> Çok keskin saçılma pikleri barındırır. Güçlü floresan arka planı yok etmek için **Yinelemeli Taban Çizgisi Düzeltme (AsLS)** veya doğrudan **2. Türev** filtresi hayat kurtarır.",
-    ftir: "<strong>FTIR (Transmission) Modu:</strong> Numunenin tamamından geçen ışık bilgisini içerir. Eksen 4000-400 cm⁻¹'e geriye doğru akar. **Savitzky-Golay Yumuşatma** parmak izi bölgesindeki ince sinyalleri korumada başarılıdır.",
-    atr: "<strong>ATR-FTIR Modu:</strong> Kristal yüzey penetrasyon derinliği dalga boyuna göre değiştiğinden sinyal şiddeti düşük frekanslarda (sağa doğru) artış gösterir. **SNV** ve **Detrend** fiziksel kristal temas farklılıklarını minimize etmek için mükemmeldir.",
-    nmr: "<strong>¹H-NMR Modu:</strong> Kimyasal kayma ekseni 10'dan 0 ppm'e geriye akar. Spin yarılmaları (multipletler) görünür. Ham verideki en büyük sorun olan **faz bozulmaları** taban çizgisi algoritması ile düzeltilerek pikler simetrik Lorentz formuna kavuşturulur.",
-    hplc: "<strong>HPLC Kromatogram Modu:</strong> Zamana bağlı kimyasal ayrımı gösterir. Kolon yaşlanması ve çözücü gradyanı taban çizgisi dalgalanmalarına sebep olur. **Taban çizgisi düzeltme** integral pik alanlarının doğru hesaplanmasını sağlar.",
-    gcms: "<strong>GC-MS TIC Kromatogramı:</strong> Sıcaklık programı yükseldikçe kolondan kimyasal madde kopması (kolon kanaması - column bleed) nedeniyle taban çizgisi üssel olarak yukarı tırmanır. **Taban Çizgisi Filtresi** bu sahte eğriyi sıfırlayarak sadece gerçek kimyasal bileşen piklerini bırakır.",
-    ms: "<strong>Kütle Spektrometrisi (MS):</strong> Ayrık ve çok keskin iyon fragman ($m/z$) kütle çizgilerini gösterir. **Savitzky-Golay Yumuşatma** filtresi kimyasal arka plan gürültü gürültüsünü (grass noise) bastırarak gerçek iyon piklerinin S/N (sinyal/gürültü) oranını artırır."
+    tr: {
+        uv: "<strong>UV-Vis Modu:</strong> Genellikle geniş moleküler absorpsiyon bantları içerir. Sinyal varyasyonunu standartlaştırmak için **SNV** veya **MSC** normalizasyonu çok sık tercih edilir.",
+        raman: "<strong>Raman Modu:</strong> Çok keskin saçılma pikleri barındırır. Güçlü floresan arka planı yok etmek için **Yinelemeli Taban Çizgisi Düzeltme (AsLS)** veya doğrudan **2. Türev** filtresi hayat kurtarır.",
+        ftir: "<strong>FTIR (Transmission) Modu:</strong> Numunenin tamamından geçen ışık bilgisini içerir. Eksen 4000-400 cm⁻¹'e geriye doğru akar. **Savitzky-Golay Yumuşatma** parmak izi bölgesindeki ince sinyalleri korumada başarılıdır.",
+        atr: "<strong>ATR-FTIR Modu:</strong> Kristal yüzey penetrasyon derinliği dalga boyuna göre değiştiğinden sinyal şiddeti düşük frekanslarda (sağa doğru) artış gösterir. **SNV** ve **Detrend** fiziksel kristal temas farklılıklarını minimize etmek için mükemmeldir.",
+        nmr: "<strong>¹H-NMR Modu:</strong> Kimyasal kayma ekseni 10'dan 0 ppm'e geriye akar. Spin yarılmaları (multipletler) görünür. Ham verideki en büyük sorun olan **faz bozulmaları** taban çizgisi algoritması ile düzeltilerek pikler simetrik Lorentz formuna kavuşturulur.",
+        hplc: "<strong>HPLC Kromatogram Modu:</strong> Zamana bağlı kimyasal ayrımı gösterir. Kolon yaşlanması ve çözücü gradyanı taban çizgisi dalgalanmalarına sebep olur. **Taban çizgisi düzeltme** integral pik alanlarının doğru hesaplanmasını sağlar.",
+        gcms: "<strong>GC-MS TIC Kromatogramı:</strong> Sıcaklık programı yükseldikçe kolondan kimyasal madde kopması (kolon kanaması - column bleed) nedeniyle taban çizgisi üssel olarak yukarı tırmanır. **Taban Çizgisi Filtresi** bu sahte eğriyi sıfırlayarak sadece gerçek kimyasal bileşen piklerini bırakır.",
+        ms: "<strong>Kütle Spektrometrisi (MS):</strong> Ayrık ve çok keskin iyon fragman ($m/z$) kütle çizgilerini gösterir. **Savitzky-Golay Yumuşatma** filtresi kimyasal arka plan gürültü gürültüsünü (grass noise) bastırarak gerçek iyon piklerinin S/N (sinyal/gürültü) oranını artırır."
+    },
+    en: {
+        uv: "<strong>UV-Vis Mode:</strong> Typically contains broad molecular absorption bands. **SNV** or **MSC** normalization is very often preferred to standardize signal variation.",
+        raman: "<strong>Raman Mode:</strong> Contains very sharp scattering peaks. To remove the strong fluorescence background, **Iterative Baseline Correction (AsLS)** or a direct **2nd Derivative** filter is a lifesaver.",
+        ftir: "<strong>FTIR (Transmission) Mode:</strong> Contains light information passing through the entire sample. The axis runs backward from 4000-400 cm⁻¹. **Savitzky-Golay Smoothing** is effective at preserving fine signals in the fingerprint region.",
+        atr: "<strong>ATR-FTIR Mode:</strong> Since crystal surface penetration depth varies with wavelength, signal intensity increases at lower frequencies (toward the right). **SNV** and **Detrend** are excellent for minimizing physical crystal-contact differences.",
+        nmr: "<strong>¹H-NMR Mode:</strong> The chemical shift axis runs backward from 10 to 0 ppm. Spin splittings (multiplets) are visible. The biggest issue in raw data, **phase distortion**, is corrected by the baseline algorithm so that peaks take on a symmetric Lorentzian shape.",
+        hplc: "<strong>HPLC Chromatogram Mode:</strong> Shows time-dependent chemical separation. Column aging and solvent gradients cause baseline fluctuations. **Baseline correction** ensures accurate calculation of integrated peak areas.",
+        gcms: "<strong>GC-MS TIC Chromatogram:</strong> As the temperature program rises, the baseline climbs exponentially due to chemical bleed-off from the column (column bleed). The **Baseline Filter** zeroes out this artificial curve, leaving only the true chemical component peaks.",
+        ms: "<strong>Mass Spectrometry (MS):</strong> Shows discrete and very sharp ion fragment ($m/z$) mass lines. The **Savitzky-Golay Smoothing** filter suppresses chemical background noise (grass noise), increasing the S/N (signal-to-noise) ratio of the true ion peaks."
+    }
 };
 
-function updateDashboard() {
+let currentLang = 'tr';
+
+const uiText = {
+    tr: {
+        pageTitle: "Gelişmiş Spektral, Kromatografik ve Kütle Ön İşleme Paneli",
+        heading: "Analitik Sinyal Ön İşleme (Preprocessing) Laboratuvarı",
+        langLabel: "Dil / Language",
+        dataTypeLabel: "Analiz Yöntemi (Veri Seti)",
+        methodLabel: "Uygulanacak Ön İşleme",
+        noiseLabel: "Rastgele Gürültü Seviyesi",
+        driftLabel: "Taban Çizgisi / Arka Plan Kayması",
+        sgWindowLabel: "Filtre Penceresi",
+        movavgWindowLabel: "Pencere Boyutu (Nokta Sayısı)",
+        resetZoomBtn: "Yakınlaştırmayı Sıfırla",
+        zoomHint: "Yakınlaştırmak istediğiniz alanı fare ile sürükleyerek işaretleyin. Kaydırmak için Shift tuşunu basılı tutup sürükleyin.",
+        defaultInfo: "Yöntem açıklamaları dinamik yüklenecektir.",
+        yAxis: "Sinyal Şiddeti",
+        defaultXAxis: "Eksen",
+        datasets: { pure: "Saf İdeal Sinyal", corrupted: "Bozulmuş Ham Veri" },
+        dataTypeOptions: {
+            uv: "UV-Vis Spektroskopisi (200-400 nm)",
+            raman: "Raman Spektroskopisi (200-2000 cm⁻¹)",
+            ftir: "FTIR (Transmission Modu - 4000-400 cm⁻¹)",
+            atr: "ATR-FTIR Spektroskopisi (4000-600 cm⁻¹)",
+            nmr: "¹H-NMR Spektroskopisi (10 - 0 ppm)",
+            hplc: "HPLC Kromatografisi (0-15 dk Alıkonma)",
+            gcms: "GC-MS Kromatogramı (TIC - 5-25 dk)",
+            ms: "Kütle Spektrometrisi (Mass Spec - 50-500 m/z)"
+        },
+        methodOptions: {
+            sg: "Savitzky-Golay Yumuşatma",
+            movavg: "Hareketli Ortalama (Moving Average)",
+            boxcar: "BoxCar Ortalama (BoxCar Average)",
+            detrend: "Taban Çizgisi / Faz Düzeltme",
+            snv: "SNV Normalizasyonu",
+            deriv1: "Birinci Türev (1st Derivative)",
+            deriv2: "İkinci Türev (2nd Derivative)"
+        },
+        axisTitles: {
+            uv: "Dalga Boyu (nm)",
+            raman: "Raman Kayması (Raman Shift - cm⁻¹)",
+            ftir: "Dalga Numarası (Wavenumber - cm⁻¹)",
+            atr: "ATR Dalga Numarası (Wavenumber - cm⁻¹)",
+            nmr: "Kimyasal Kayma (Chemical Shift - δ ppm)",
+            hplc: "Alıkonma Zamanı (Retention Time - dakika)",
+            gcms: "GC Alıkonma Zamanı (Retention Time - dakika)",
+            ms: "Kütle / Yük Oranı (m/z)"
+        }
+    },
+    en: {
+        pageTitle: "Advanced Spectral, Chromatographic and Mass Preprocessing Panel",
+        heading: "Analytical Signal Preprocessing Laboratory",
+        langLabel: "Dil / Language",
+        dataTypeLabel: "Analysis Method (Dataset)",
+        methodLabel: "Preprocessing Method to Apply",
+        noiseLabel: "Random Noise Level",
+        driftLabel: "Baseline / Background Drift",
+        sgWindowLabel: "Filter Window",
+        movavgWindowLabel: "Window Size (Number of Points)",
+        resetZoomBtn: "Reset Zoom",
+        zoomHint: "Drag over an area to mark and zoom into it. Hold Shift and drag to pan.",
+        defaultInfo: "Method descriptions will load dynamically.",
+        yAxis: "Signal Intensity",
+        defaultXAxis: "Axis",
+        datasets: { pure: "Pure Ideal Signal", corrupted: "Corrupted Raw Data" },
+        dataTypeOptions: {
+            uv: "UV-Vis Spectroscopy (200-400 nm)",
+            raman: "Raman Spectroscopy (200-2000 cm⁻¹)",
+            ftir: "FTIR (Transmission Mode - 4000-400 cm⁻¹)",
+            atr: "ATR-FTIR Spectroscopy (4000-600 cm⁻¹)",
+            nmr: "¹H-NMR Spectroscopy (10 - 0 ppm)",
+            hplc: "HPLC Chromatography (0-15 min Retention)",
+            gcms: "GC-MS Chromatogram (TIC - 5-25 min)",
+            ms: "Mass Spectrometry (Mass Spec - 50-500 m/z)"
+        },
+        methodOptions: {
+            sg: "Savitzky-Golay Smoothing",
+            movavg: "Moving Average",
+            boxcar: "BoxCar Average",
+            detrend: "Baseline / Phase Correction",
+            snv: "SNV Normalization",
+            deriv1: "First Derivative (1st Derivative)",
+            deriv2: "Second Derivative (2nd Derivative)"
+        },
+        axisTitles: {
+            uv: "Wavelength (nm)",
+            raman: "Raman Shift (cm⁻¹)",
+            ftir: "Wavenumber (cm⁻¹)",
+            atr: "ATR Wavenumber (cm⁻¹)",
+            nmr: "Chemical Shift (δ ppm)",
+            hplc: "Retention Time (minutes)",
+            gcms: "GC Retention Time (minutes)",
+            ms: "Mass / Charge Ratio (m/z)"
+        }
+    }
+};
+
+function applyLanguage(lang) {
+    currentLang = lang;
+    const t = uiText[lang];
+
+    document.documentElement.lang = lang;
+    document.title = t.pageTitle;
+    document.getElementById('mainHeading').innerText = t.heading;
+    document.getElementById('langLabel').innerText = t.langLabel;
+    document.getElementById('dataTypeLabel').innerText = t.dataTypeLabel;
+    document.getElementById('methodLabel').innerText = t.methodLabel;
+    document.getElementById('sgWindowLabel').childNodes[0].nodeValue = t.sgWindowLabel + ' ';
+    document.getElementById('movavgWindowLabel').childNodes[0].nodeValue = t.movavgWindowLabel + ' ';
+    document.getElementById('resetZoomBtn').innerText = t.resetZoomBtn;
+    document.getElementById('zoomHint').innerText = t.zoomHint;
+    document.getElementById('noiseLabel').childNodes[0].nodeValue = t.noiseLabel + ' ';
+    document.getElementById('driftLabel').childNodes[0].nodeValue = t.driftLabel + ' ';
+
+    const dataTypeSelect = document.getElementById('dataType');
+    for (const opt of dataTypeSelect.options) {
+        opt.text = t.dataTypeOptions[opt.value];
+    }
+
+    const methodSelect = document.getElementById('method');
+    for (const opt of methodSelect.options) {
+        opt.text = t.methodOptions[opt.value];
+    }
+
+    chart.data.datasets[0].label = t.datasets.pure;
+    chart.data.datasets[1].label = t.datasets.corrupted;
+    chart.options.scales.y.title.text = t.yAxis;
+
+    updateDashboard(false);
+}
+
+let hasGeneratedData = false;
+let lastDataType = null;
+
+function updateDashboard(regenerateData) {
     const dataType = document.getElementById('dataType').value;
     const method = document.getElementById('method').value;
     const noise = parseFloat(document.getElementById('noise').value);
     const drift = parseFloat(document.getElementById('drift').value);
     const sgWindow = parseInt(document.getElementById('sgWindow').value);
+    const movavgWindow = parseInt(document.getElementById('movavgWindow').value);
     
     document.getElementById('noiseVal').innerText = noise;
     document.getElementById('driftVal').innerText = drift;
     document.getElementById('sgWindowVal').innerText = sgWindow;
+    document.getElementById('movavgWindowVal').innerText = movavgWindow;
     
-    document.getElementById('infoText').innerHTML = explanations[dataType];
+    document.getElementById('infoText').innerHTML = explanations[currentLang][dataType];
     
-    if (method === 'detrend' || method === 'snv') {
+    if (method === 'movavg') {
+        document.getElementById('movavg-window-group').style.display = 'block';
+        document.getElementById('sg-window-group').style.display = 'none';
+    } else if (method === 'detrend' || method === 'snv') {
+        document.getElementById('movavg-window-group').style.display = 'none';
         document.getElementById('sg-window-group').style.display = 'none';
     } else {
+        document.getElementById('movavg-window-group').style.display = 'none';
         document.getElementById('sg-window-group').style.display = 'block';
     }
     
-    const data = generateData(dataType, noise, drift);
-    const processedData = applyPreprocessing(data.corrupted, method, sgWindow, dataType);
+    // Gürültülü/bozulmuş sinyal SADECE veri seti, gürültü seviyesi veya taban çizgisi kayması
+    // değiştiğinde yeniden üretilir. Ön işleme yöntemi veya pencere boyutu değişiklikleri
+    // sadece mavi (ön işlenmiş) sinyali yeniden hesaplar, kırmızı ham veri sabit kalır.
+    if (regenerateData || !hasGeneratedData) {
+        if (dataType !== lastDataType && chart.resetZoom) {
+            chart.resetZoom();
+        }
+        const data = generateData(dataType, noise, drift);
+        chart.data.labels = currentXAxes;
+        chart.data.datasets[0].data = data.pure;
+        chart.data.datasets[1].data = data.corrupted;
+        hasGeneratedData = true;
+        lastDataType = dataType;
+    }
     
-    chart.data.labels = currentXAxes;
-    chart.data.datasets[0].data = data.pure;
-    chart.data.datasets[1].data = data.corrupted;
+    const corruptedSource = chart.data.datasets[1].data;
+    const processedData = applyPreprocessing(corruptedSource, method, sgWindow, dataType, movavgWindow);
     chart.data.datasets[2].data = processedData;
     
-    if (dataType === 'uv') { chart.options.scales.x.title.text = 'Dalga Boyu (nm)'; }
-    else if (dataType === 'raman') { chart.options.scales.x.title.text = 'Raman Kayması (Raman Shift - cm⁻¹)'; }
-    else if (dataType === 'ftir') { chart.options.scales.x.title.text = 'Dalga Numarası (Wavenumber - cm⁻¹)'; }
-    else if (dataType === 'atr') { chart.options.scales.x.title.text = 'ATR Dalga Numarası (Wavenumber - cm⁻¹)'; }
-    else if (dataType === 'nmr') { chart.options.scales.x.title.text = 'Kimyasal Kayma (Chemical Shift - δ ppm)'; }
-    else if (dataType === 'hplc') { chart.options.scales.x.title.text = 'Alıkonma Zamanı (Retention Time - dakika)'; }
-    else if (dataType === 'gcms') { chart.options.scales.x.title.text = 'GC Alıkonma Zamanı (Retention Time - dakika)'; }
-    else if (dataType === 'ms') { chart.options.scales.x.title.text = 'Kütle / Yük Oranı (m/z)'; }
-    
+    chart.options.scales.x.title.text = uiText[currentLang].axisTitles[dataType] || uiText[currentLang].defaultXAxis;
+    chart.options.scales.y.title.text = uiText[currentLang].yAxis;
+    chart.data.datasets[0].label = uiText[currentLang].datasets.pure;
+    chart.data.datasets[1].label = uiText[currentLang].datasets.corrupted;
+
     chart.data.datasets[2].label = document.getElementById('method').options[document.getElementById('method').selectedIndex].text;
     chart.update('none');
 }
@@ -413,22 +642,52 @@ window.onload = function() {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                x: { title: { display: true, text: 'Eksen', font: { weight: 'bold', size: 12 } } },
-                y: { title: { display: true, text: 'Sinyal Şiddeti', font: { weight: 'bold', size: 12 } } }
+                x: { title: { display: true, text: 'Axis', font: { weight: 'bold', size: 12 } } },
+                y: { title: { display: true, text: 'Signal Intensity', font: { weight: 'bold', size: 12 } } }
             },
             plugins: {
-                legend: { position: 'top', labels: { boxWidth: 20 } }
+                legend: { position: 'top', labels: { boxWidth: 20 } },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'xy',
+                        modifierKey: 'shift'
+                    },
+                    zoom: {
+                        wheel: { enabled: false },
+                        pinch: { enabled: true },
+                        drag: {
+                            enabled: true,
+                            backgroundColor: 'rgba(52, 152, 219, 0.25)',
+                            borderColor: 'rgba(41, 128, 185, 0.9)',
+                            borderWidth: 1
+                        },
+                        mode: 'xy'
+                    },
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 'original', max: 'original' }
+                    }
+                }
             }
         }
     });
 
-    document.getElementById('dataType').addEventListener('change', updateDashboard);
-    document.getElementById('method').addEventListener('change', updateDashboard);
-    document.getElementById('noise').addEventListener('input', updateDashboard);
-    document.getElementById('drift').addEventListener('input', updateDashboard);
-    document.getElementById('sgWindow').addEventListener('input', updateDashboard);
-    
-    updateDashboard();
+    document.getElementById('dataType').addEventListener('change', function() { updateDashboard(true); });
+    document.getElementById('method').addEventListener('change', function() { updateDashboard(false); });
+    document.getElementById('noise').addEventListener('input', function() { updateDashboard(true); });
+    document.getElementById('drift').addEventListener('input', function() { updateDashboard(true); });
+    document.getElementById('sgWindow').addEventListener('input', function() { updateDashboard(false); });
+    document.getElementById('movavgWindow').addEventListener('input', function() { updateDashboard(false); });
+    document.getElementById('langSelect').addEventListener('change', function() {
+        applyLanguage(this.value);
+    });
+
+    document.getElementById('resetZoomBtn').addEventListener('click', function() {
+        chart.resetZoom();
+    });
+
+    applyLanguage('tr');
 };
 </script>
 </body>
