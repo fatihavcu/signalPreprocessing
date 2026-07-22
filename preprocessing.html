@@ -594,6 +594,7 @@ function updateDashboard(regenerateData) {
     const drift = parseFloat(document.getElementById('drift').value);
     const sgWindow = parseInt(document.getElementById('sgWindow').value);
     const movavgWindow = parseInt(document.getElementById('movavgWindow').value);
+    let dataTypeChanged = false;
     
     document.getElementById('noiseVal').innerText = noise;
     document.getElementById('driftVal').innerText = drift;
@@ -617,14 +618,12 @@ function updateDashboard(regenerateData) {
     // değiştiğinde yeniden üretilir. Ön işleme yöntemi veya pencere boyutu değişiklikleri
     // sadece mavi (ön işlenmiş) sinyali yeniden hesaplar, kırmızı ham veri sabit kalır.
     if (regenerateData || !hasGeneratedData) {
-        if (dataType !== lastDataType && chart.resetZoom) {
-            chart.resetZoom();
-        }
         const data = generateData(dataType, noise, drift);
         chart.data.labels = currentXAxes;
         chart.data.datasets[0].data = data.pure;
         chart.data.datasets[1].data = data.corrupted;
         hasGeneratedData = true;
+        dataTypeChanged = (dataType !== lastDataType);
         lastDataType = dataType;
     }
     
@@ -639,6 +638,13 @@ function updateDashboard(regenerateData) {
 
     chart.data.datasets[2].label = document.getElementById('method').options[document.getElementById('method').selectedIndex].text;
     chart.update('none');
+
+    // Zoom/pan sıfırlaması, YENİ veri render edildikten SONRA yapılmalı; aksi halde eklenti
+    // eski veri setinin eksen aralığını "orijinal" olarak kilitleyip yeni sinyalin
+    // görünmesini engelliyordu (analiz yöntemi değiştirildiğinde spektrum değişmiyormuş gibi görünüyordu).
+    if (dataTypeChanged && chart.resetZoom) {
+        chart.resetZoom();
+    }
 }
 
 window.onload = function() {
