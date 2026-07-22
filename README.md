@@ -1,12 +1,16 @@
 # Analytical Signal Preprocessing Laboratory 🧪📊
 
-![version](https://img.shields.io/badge/version-v0.2-blue)
+![version](https://img.shields.io/badge/version-v0.3-blue)
 
 This repository contains a single-file interactive digital laboratory dashboard designed to simulate and demonstrate the visual effects of chemometric preprocessing filters on various analytical chemistry signals.
 
 It serves as an educational and prototyping tool for researchers, data scientists, and students working with spectroscopy, chromatography, and mass spectrometry data.
 
 ---
+
+## 🆕 What's New in v0.3
+
+- **Fixed:** Spectrum not refreshing when switching the analysis method. Previously, resetting the zoom/pan view *before* the new dataset was assigned caused the chart to stay locked to the previous signal's axis range. The reset now runs *after* the new data is rendered, so switching the analytical technique correctly redraws the spectrum and its axes every time.
 
 ## 🆕 What's New in v0.2
 
@@ -68,6 +72,13 @@ The dashboard goes beyond simple synthetic inputs by accurately mimicking the un
 ## 🌐 Language Support
 
 Use the **Dil / Language** selector above the analysis method dropdown to switch the entire interface — labels, dropdown options, method descriptions, and chart axis titles — between **Türkçe** and **English**.
+
+---
+
+## 👤 Author
+
+**Fatih Mehmet AVCU**
+📧 fatih.avcu@inonu.edu.tr
 
 ---
 
